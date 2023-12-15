@@ -4,6 +4,7 @@
 #include <thread>
 #include <functional>      // 用于 std::function 的头文件
 #include "ffmsg_queue.h"
+#include "ff_ffplay_def.h"
 
 class FFPlayer
 {
@@ -13,12 +14,15 @@ public:
     int ffp_create();
     int ffp_prepare_async_l(char *file_name);
     int stream_open( const char *file_name);  
+    void stream_close();
     int read_thread();
 
     MessageQueue msg_queue_;
     std::thread *read_thread_;
 
     char *input_filename_;
+
+    int abort_request = 0;
 
 
 

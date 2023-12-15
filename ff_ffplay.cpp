@@ -3,7 +3,6 @@
 #include <string.h>
 #include "ffmsg.h"
 #include "SDL.h"
-#include "log.h"
 #include "ff_ffplay.h"
 
 FFPlayer::FFPlayer() {
@@ -44,6 +43,27 @@ int FFPlayer::stream_open(const char *file_name) {
     // ● 创建视频刷新线程video_refresh_thread
 
     return 0;
+fail:
+    stream_close();
+    return -1;
+}
+
+void FFPlayer::stream_close()
+{
+    abort_request = 1; // 请求退出
+    if(read_thread_ && read_thread_->joinable()) {
+        read_thread_->join();       // 等待线程退出
+    }
+
+    // 关闭解复用器 avformat_close_input(&is->ic);
+    // 释放packet队列
+
+    // 释放frame队列
+
+    if(input_filename_) {
+        free(input_filename_);
+        input_filename_ = NULL;
+    }
 }
 
 int FFPlayer::read_thread() {

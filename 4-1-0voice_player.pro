@@ -24,6 +24,7 @@ DEFINES += QT_DEPRECATED_WARNINGS
 
 
 SOURCES += \
+    ff_ffplay_def.cpp \
         main.cpp \
         mainwind.cpp \
     ctrlbar.cpp \
@@ -35,6 +36,7 @@ SOURCES += \
     ff_ffplay.cpp
 
 HEADERS += \
+    ff_ffplay_def.h \
         mainwind.h \
     ctrlbar.h \
     titlebar.h \
