@@ -19,6 +19,7 @@ public:
     int InitSignalsAndSlots();
     int message_loop(void *arg);
     void OnPlayOrPause();
+    void OnStop();
 
 private:
     Ui::MainWind *ui;

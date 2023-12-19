@@ -12,9 +12,18 @@ public:
     FFPlayer();
     ~FFPlayer();
     int ffp_create();
+    void ffp_destroy();
     int ffp_prepare_async_l(char *file_name);
+
+    int ffp_start_l();
+    int ffp_stop_l();
     int stream_open( const char *file_name);  
     void stream_close();
+    // 打开指定stream对应解码器、创建解码线程、以及初始化对应的输出
+    int stream_component_open(int stream_index);
+    // 关闭指定stream的解码线程，释放解码器资源
+    void stream_component_close(int stream_index);
+    
     int read_thread();
 
     MessageQueue msg_queue_;
@@ -24,15 +33,16 @@ public:
 
     int abort_request = 0;
 
+    // 帧队列
+    FrameQueue pictq;
+    FrameQueue sampq;
 
+    // 包队列
+    PacketQueue audioq;
+    PacketQueue videoq;
 
-private:
-    
-    // std::function<int(const Frame *)> video_refresh_callback_ = NULL;
-    // /* ffplay context */
-    // VideoState *is;
-    // const char* wanted_stream_spec[AVMEDIA_TYPE_NB];
-
+    int audio_stream = -1;
+    int video_stream = -1;
 };
 
 inline static void ffp_notify_msg1(FFPlayer *ffp, int what) {

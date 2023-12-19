@@ -16,6 +16,7 @@ public:
     ~CtrlBar();
 signals:
     void SigPlayOrPause();      // 先实现这个
+    void SigStop();
 
 private slots:
     void on_playOrPauseBtn_clicked();

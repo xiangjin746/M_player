@@ -41,6 +41,7 @@ int IjkMediaPlayer::ijkmp_create(std::function<int(void *)> msg_loop) {
 
 // 销毁 IJKMP 实例
 int IjkMediaPlayer::ijkmp_destroy() {
+    ffplayer_->ffp_destroy();
     return 0;
 }
 
@@ -87,8 +88,10 @@ int IjkMediaPlayer::ijkmp_msg_loop(void *arg)
 
 // 停止
 int IjkMediaPlayer::ijkmp_stop() {
-    // 实现代码
-    // 返回适当的结果
+    int retval = ffplayer_->ffp_stop_l();
+    if (retval < 0) {
+        return retval;
+    }
 }
 
 // 暂停

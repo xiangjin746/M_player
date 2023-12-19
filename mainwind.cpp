@@ -24,8 +24,11 @@ MainWind::~MainWind()
 
 int MainWind::InitSignalsAndSlots()
 {
-    bool success = connect(ui->ctrlBarWind, &CtrlBar::SigPlayOrPause, this, &MainWind::OnPlayOrPause);
-    qDebug() << "Connection successful:" << success;
+    bool SigPlayOrPause_success = connect(ui->ctrlBarWind, &CtrlBar::SigPlayOrPause, this, &MainWind::OnPlayOrPause);
+    qDebug() << "SigPlayOrPause Connection successful:" << SigPlayOrPause_success;
+
+    bool SigStop_success = connect(ui->ctrlBarWind, &CtrlBar::SigStop, this, &MainWind::OnStop);
+    qDebug() << "SigStop Connection successful:" << SigStop_success;
 
 }
 
@@ -99,4 +102,15 @@ void MainWind::OnPlayOrPause()
     
 
 
+}
+
+void MainWind::OnStop()
+{
+    qDebug() << "OnStop call";
+    if(mp_){
+        mp_->ijkmp_stop();
+        mp_->ijkmp_destroy();
+        delete mp_;
+        mp_ = NULL;
+    }
 }

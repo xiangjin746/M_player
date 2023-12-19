@@ -19,6 +19,14 @@ int FFPlayer::ffp_create() {
     return 0;
 }
 
+void FFPlayer::ffp_destroy()
+{
+    stream_close();
+
+    // 销毁消息队列
+    msg_queue_destroy(&msg_queue_);
+}
+
 int FFPlayer::ffp_prepare_async_l(char *file_name) {
     input_filename_ = strdup(file_name);
 
@@ -26,6 +34,19 @@ int FFPlayer::ffp_prepare_async_l(char *file_name) {
 
     return reval;
 }
+
+int FFPlayer::ffp_start_l()
+{
+    // 触发播放
+    std::cout << __FUNCTION__;
+}
+
+int FFPlayer::ffp_stop_l()
+{
+    abort_request = 1;  // 请求退出
+    msg_queue_abort(&msg_queue_);  // 禁止再插入消息
+}
+
 
 int FFPlayer::stream_open(const char *file_name) {
     // ● 初始化SDL以允许⾳频输出；
@@ -35,7 +56,15 @@ int FFPlayer::stream_open(const char *file_name) {
         return -1;
     }
     // ● 初始化帧Frame队列
+    if (frame_queue_init(&pictq,&videoq,VIDEO_PICTURE_QUEUE_SIZE_DEFAULT) < 0 || frame_queue_init(&sampq,&audioq,SAMPLE_QUEUE_SIZE) < 0){
+        goto fail;
+    }
+
     // ● 初始化包Packet队列
+    if (packet_queue_init(&videoq) < 0 || packet_queue_init(&audioq) < 0){
+        goto fail;
+    }
+
     // ● 初始化时钟Clock
     // ● 初始化⾳量
     // ● 创建解复⽤读取线程read_thread
@@ -57,8 +86,12 @@ void FFPlayer::stream_close()
 
     // 关闭解复用器 avformat_close_input(&is->ic);
     // 释放packet队列
+    packet_queue_destroy(&videoq);
+    packet_queue_destroy(&audioq);
 
     // 释放frame队列
+    frame_queue_destory(&pictq);
+    frame_queue_destory(&sampq);
 
     if(input_filename_) {
         free(input_filename_);
@@ -76,9 +109,16 @@ int FFPlayer::read_thread() {
     ffp_notify_msg1(this, FFP_MSG_PREPARED);
     std::cout << "read_thread FFP_MSG_PREPARED " << this << std::endl;
 
-        while (1) {
-//        std::cout << "read_thread sleep, mp:" << this << std::endl;
+    while (1) {
+       std::cout << "read_thread sleep, mp:" << this << std::endl;
         // 先模拟线程运行
         std::this_thread::sleep_for(std::chrono::milliseconds(1000));
+        if(abort_request){
+            break;
+        }
     }
+
+    std::cout << __FUNCTION__ << " leave" << std::endl;
+
+    return 0;
 }
