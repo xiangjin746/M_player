@@ -89,7 +89,7 @@ void MainWind::OnPlayOrPause()
             return;
         }
         // 1.2 设置url
-        mp_->ijkmp_set_data_source("2_audio.mp4");
+        mp_->ijkmp_set_data_source("test.mp4");
         // 1.3 准备工作
         ret = mp_->ijkmp_prepare_async();
         if(ret <0) {

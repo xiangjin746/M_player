@@ -41,8 +41,14 @@ public:
     PacketQueue audioq;
     PacketQueue videoq;
 
+    AVStream *audio_st = NULL;
+    AVStream *video_st = NULL;
+    
     int audio_stream = -1;
     int video_stream = -1;
+
+    int eof = 0;
+    AVFormatContext *ic = NULL;
 };
 
 inline static void ffp_notify_msg1(FFPlayer *ffp, int what) {
