@@ -63,7 +63,7 @@ int MainWind::message_loop(void *arg)
         msg_free_res(&msg);
 //        qDebug() << "message_loop sleep, mp:" << mp;
         // 先模拟线程运行
-        std::this_thread::sleep_for(std::chrono::milliseconds(1000));
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
     }
 
 
@@ -89,7 +89,7 @@ void MainWind::OnPlayOrPause()
             return;
         }
         // 1.2 设置url
-        mp_->ijkmp_set_data_source("test.mp4");
+        mp_->ijkmp_set_data_source("2_audio.mp4");
         // 1.3 准备工作
         ret = mp_->ijkmp_prepare_async();
         if(ret <0) {
