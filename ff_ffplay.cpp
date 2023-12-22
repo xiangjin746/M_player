@@ -174,6 +174,7 @@ int FFPlayer::stream_component_open(int stream_index)
             break;
     }
 
+    goto out;//此处不加的话 进入错误处理把avctx释放掉了导致无效的参数了。。。
     // 6. 错误处理
 fail:
     avcodec_free_context(&avctx);
