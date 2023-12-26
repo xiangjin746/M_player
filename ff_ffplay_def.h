@@ -73,6 +73,14 @@ typedef struct PacketQueue {
 #define SAMPLE_QUEUE_SIZE           9       // 采样帧缓存数量
 #define FRAME_QUEUE_SIZE FFMAX(SAMPLE_QUEUE_SIZE, FFMAX(VIDEO_PICTURE_QUEUE_SIZE, SUBPICTURE_QUEUE_SIZE))
 
+typedef struct AudioParams {
+    int			freq;                   // 采样率
+    int			channels;               // 通道数
+    int64_t		channel_layout;         // 通道布局，比如2.1声道，5.1声道等
+    enum AVSampleFormat	fmt;            // 音频采样格式，比如AV_SAMPLE_FMT_S16表示为有符号16bit深度，交错排列模式。
+    int			frame_size;             // 一个采样单元占用的字节数（比如2通道时，则左右通道各采样一次合成一个采样单元）
+    int			bytes_per_sec;          // 一秒时间的字节数，比如采样率48Khz，2 channel，16bit，则一秒48000*2*16/8=192000
+} AudioParams;
 
 /* Common struct for handling all types of decoded data and allocated render buffers. */
 // 用于缓存解码后的数据

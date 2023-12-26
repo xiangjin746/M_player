@@ -5,6 +5,11 @@
 #include "SDL.h"
 #include "ff_ffplay.h"
 
+/* Minimum SDL audio buffer size, in samples. */
+#define SDL_AUDIO_MIN_BUFFER_SIZE 512
+/* Calculate actual buffer size keeping in mind not cause too frequent audio callbacks */
+#define SDL_AUDIO_MAX_CALLBACKS_PER_SEC 30
+
 FFPlayer::FFPlayer() {
 
 }
@@ -154,12 +159,27 @@ int FFPlayer::stream_component_open(int stream_index)
             nb_channels = avctx->channels;
             channel_layout = avctx->channel_layout;
 
+            /* prepare audio output 准备音频输出*/
+            //调用audio_open打开sdl音频输出，实际打开的设备参数保存在audio_tgt，返回值表示输出设备的缓冲区大小
+            if ((ret = audio_open( channel_layout, nb_channels, sample_rate, &audio_tgt)) < 0)
+                goto fail;
+            
+            audio_hw_buf_size = ret;
+            audio_src = audio_tgt;  //暂且将数据源参数等同于目标输出参数
+            //初始化audio_buf相关参数
+            audio_buf_size  = 0;
+            audio_buf_index = 0;
+
             audio_stream = stream_index;
             audio_st = ic->streams[stream_index];
             // 初始化ffplay封装的音频解码器, 并将解码器上下文 avctx和Decoder绑定
              auddec.decoder_init(avctx, &audioq);
             // 启动音频解码线程
             auddec.decoder_start(AVMEDIA_TYPE_AUDIO, "audio_thread", this);
+
+            // 允许音频输出
+            //play audio
+            SDL_PauseAudio(0);
             break;
         case AVMEDIA_TYPE_VIDEO:
             video_stream = stream_index;
@@ -202,14 +222,11 @@ void FFPlayer::stream_component_close(int stream_index)
         // 销毁解码器
         auddec.decoder_destroy();
         // 释放重采样器
+        swr_free(&swr_ctx);
         // 释放audio buf
-        //        decoder_abort(&is->auddec, &is->sampq); // 解码器线程请求abort的时候有调用 packet_queue_abort
-        //        SDL_CloseAudioDevice(audio_dev);
-        //        decoder_destroy(&is->auddec);
-        //        swr_free(&is->swr_ctx);
-        //        av_freep(&is->audio_buf1);
-        //        is->audio_buf1_size = 0;
-        //        is->audio_buf = NULL;
+        av_freep(&audio_buf1);
+        audio_buf1_size = 0;
+        audio_buf = NULL;
         break;
     case AVMEDIA_TYPE_VIDEO:
         // ... 关闭视频相关的组件
@@ -238,6 +255,213 @@ void FFPlayer::stream_component_close(int stream_index)
         default:
             break;
     }
+}
+
+static int audio_decode_frame(FFPlayer *is)
+{
+    Frame *af = NULL;
+    int data_size = 0,resampled_data_size = 0;
+    int wanted_nb_samples = 0;
+    uint64_t dec_channel_layout = 0;
+    int ret = 0;
+
+    // 1.获取可读的音频帧：
+    if(!(af = frame_queue_peek_readable(&is->sampq)))
+        return -1;
+
+    // 2.计算原始音频数据大小：
+    data_size = av_samples_get_buffer_size(NULL, af->frame->channels, af->frame->nb_samples, (enum AVSampleFormat)af->frame->format, 1);
+
+    // 3.确定声道布局：
+    dec_channel_layout = (af->frame->channel_layout 
+                            && af->frame->channels == av_get_channel_layout_nb_channels(af->frame->channel_layout)) 
+                            ?  af->frame->channel_layout : av_get_default_channel_layout(af->frame->channels);
+
+    wanted_nb_samples = af->frame->nb_samples; // 目前不考虑非音视频同步的是情况
+
+    // 4.音频重采样条件判断和设置：
+    if (af->frame->format           != is->audio_src.fmt            || // 采样格式
+            dec_channel_layout      != is->audio_src.channel_layout || // 通道布局
+            af->frame->sample_rate  != is->audio_src.freq          // 采样率
+            ) {
+        // ... 设置重采样上下文 ...
+        swr_free(&is->swr_ctx);
+        is->swr_ctx = swr_alloc_set_opts(NULL,
+                                        is->audio_tgt.channel_layout, 
+                                        is->audio_tgt.fmt, 
+                                        is->audio_tgt.freq,
+                                        dec_channel_layout, 
+                                        (enum AVSampleFormat)af->frame->format, 
+                                        af->frame->sample_rate,
+                                        0,NULL);
+        if (!is->swr_ctx || swr_init(is->swr_ctx) < 0){
+            av_log(NULL, AV_LOG_ERROR,
+                "Cannot create sample rate converter for conversion of %d Hz %s %d channels to %d Hz %s %d channels!\n",
+                af->frame->sample_rate, av_get_sample_fmt_name((enum AVSampleFormat)af->frame->format), af->frame->channels,
+                is->audio_tgt.freq, av_get_sample_fmt_name(is->audio_tgt.fmt), is->audio_tgt.channels);
+            swr_free(&is->swr_ctx);
+            ret = -1;
+            goto fail;
+        }
+        is->audio_src.channel_layout = dec_channel_layout;
+        is->audio_src.channels = af->frame->channels;
+        is->audio_src.freq = af->frame->sample_rate;
+        is->audio_src.fmt = (enum AVSampleFormat)af->frame->format;
+    }
+
+    // 5.执行音频重采样：
+    if (is->swr_ctx) {
+        // 设置重采样输入
+        // 重采样输入参数1：输入音频样本数是af->frame->nb_samples
+        // 重采样输入参数2：输入音频缓冲区
+        const uint8_t **in = (const uint8_t **)af->frame->extended_data;
+
+        // 重采样输出参数1：输出音频缓冲区
+        uint8_t **out = &is->audio_buf1;     // 输出数据缓冲区
+
+        // 重采样输出参数2：输出音频缓冲区尺寸， 高采样率往低采样率转换时得到更少的样本数量，比如 96k->48k, wanted_nb_samples=1024
+        // 则wanted_nb_samples * is->audio_tgt.freq / af->frame->sample_rate 为1024*48000/96000 = 512
+        // +256 的目的是重采样内部是有一定的缓存，就存在上一次的重采样还缓存数据和这一次重采样一起输出的情况，所以目的是多分配输出buffer
+        int out_count = (int64_t)wanted_nb_samples * is->audio_tgt.freq / af->frame->sample_rate + 256;
+
+         // 计算对应的样本数 对应的采样格式 以及通道数，需要多少buffer空间
+        int out_size = av_samples_get_buffer_size(NULL, 
+                                                    is->audio_tgt.channels,
+                                                    out_count, 
+                                                    is->audio_tgt.fmt, 0);
+        int len2;
+        if (out_size < 0) {
+            av_log(NULL, AV_LOG_ERROR, "av_samples_get_buffer_size() failed\n");
+            ret = -1;
+            goto fail;
+        }
+
+        // 分配输出缓冲区
+        av_fast_malloc(&is->audio_buf1, &is->audio_buf1_size, out_size);
+        if (!is->audio_buf1) {
+            ret = AVERROR(ENOMEM);
+            goto fail;
+        }
+        // 执行重采样转换
+        len2 = swr_convert(is->swr_ctx, out, out_count, in, af->frame->nb_samples);
+        if (len2 < 0) {
+            av_log(NULL, AV_LOG_ERROR, "swr_convert() failed\n");
+            ret = -1;
+            goto fail;
+        }
+        if (len2 == out_count) { // 这里的意思是我已经多分配了buffer，实际输出的样本数不应该超过我多分配的数量
+            av_log(NULL, AV_LOG_WARNING, "audio buffer is probably too small\n");
+            if (swr_init(is->swr_ctx) < 0)
+                swr_free(&is->swr_ctx);
+        }
+
+        // 处理转换后的数据
+        is->audio_buf = is->audio_buf1;
+        resampled_data_size = len2 * av_get_bytes_per_sample(is->audio_tgt.fmt) * is->audio_tgt.channels;
+
+    } else {
+        // ... 无需重采样，直接使用原始数据 ...
+        is->audio_buf = af->frame->data[0];
+        resampled_data_size = data_size;
+    }
+
+    // 6.更新音频帧队列：
+    frame_queue_next(&is->sampq);
+    ret = resampled_data_size;
+
+fail:
+    return ret;
+}
+
+/* prepare a new audio buffer */
+/**
+ * @brief sdl_audio_callback
+ * @param opaque    指向user的数据
+ * @param stream    拷贝PCM的地址
+ * @param len       需要拷贝的长度
+ */
+static void sdl_audio_callback(void *opaque, Uint8 *stream, int len)
+{
+    // 1.初始化
+    FFPlayer *is = (FFPlayer *)opaque;
+    int audio_size,len1;
+
+    // 2.处理音频数据
+    while(len > 0){ //步骤 2.1：循环检查和填充
+        if(is->audio_buf_index >= is->audio_buf_size){// 步骤 2.2：检查和填充音频缓冲区
+            // 步骤 2.3：解码音频帧
+            audio_size = audio_decode_frame(is);
+            if(audio_size < 0){
+                is->audio_buf = NULL;
+                is->audio_buf_size = SDL_AUDIO_MIN_BUFFER_SIZE / is->audio_tgt.frame_size * is->audio_tgt.frame_size;
+            }else{
+                is->audio_buf_size = audio_size; // 更新缓冲区大小
+            }
+            is->audio_buf_index = 0;
+        }
+
+        // 3. 更新和拷贝数据
+        len1 = is->audio_buf_size - is->audio_buf_index;// 步骤 3.1：计算拷贝长度
+        if(len1 > len) {
+            len1 = len;
+        }
+        
+        if(is->audio_buf){
+            memcpy(stream, (uint8_t *)is->audio_buf + is->audio_buf_index, len1); // 步骤 3.2：拷贝数据到SDL缓冲区
+        }
+        len -= len1;// 步骤 3.3：更新指针和长度
+        stream += len1;
+        is->audio_buf_index += len1;
+    }
+}
+
+int FFPlayer::audio_open(int64_t wanted_channel_layout,
+                          int wanted_nb_channels, int wanted_sample_rate,
+                          struct AudioParams *audio_hw_params)
+{
+    // 初始化SDL_AudioSpec结构体，设置期望的音频参数。
+    SDL_AudioSpec wanted_spec;
+    memset(&wanted_spec, 0, sizeof(wanted_spec));
+    wanted_spec.freq = wanted_sample_rate;
+    wanted_spec.format = AUDIO_S16SYS;
+    wanted_spec.channels = wanted_nb_channels;
+    wanted_spec.silence = 0;
+    wanted_spec.samples = 2048;
+    wanted_spec.callback = sdl_audio_callback;
+    wanted_spec.userdata = this;
+
+    // 打开音频设备，并确保我们得到了我们请求的格式参数。
+    if(SDL_OpenAudio(&wanted_spec,NULL) != 0){
+        printf("Failed to open audio device, %s\n", SDL_GetError());
+        return -1;
+    }
+
+    // 将实际的音频参数（可能与请求的参数有所不同）存储在audio_hw_params结构体中。
+    audio_hw_params->fmt = AV_SAMPLE_FMT_S16;
+    audio_hw_params->freq = wanted_spec.freq;
+    audio_hw_params->channel_layout = wanted_channel_layout;
+    audio_hw_params->channels = wanted_spec.channels;
+    // 计算每个采样点的大小。
+    audio_hw_params->frame_size = av_samples_get_buffer_size(NULL, audio_hw_params->channels, 
+                                                                1, 
+                                                                audio_hw_params->fmt, 1);
+    // 计算每秒音频数据的字节大小。
+    audio_hw_params->bytes_per_sec = av_samples_get_buffer_size(NULL, audio_hw_params->channels, 
+                                                                audio_hw_params->freq, // 44100
+                                                                audio_hw_params->fmt, 1);
+    // 检查参数是否有效。
+    if ( audio_hw_params->bytes_per_sec <= 0 || audio_hw_params->frame_size <= 0){
+        printf("av_samples_get_buffer_size failed!\n");
+        return -1;
+    }
+
+    // 返回SDL内部音频缓冲区的大小。
+    return wanted_spec.size;    /* SDL内部缓存的数据字节, samples * channels *byte_per_sample */
+}
+
+void FFPlayer::audio_close()
+{
+    SDL_CloseAudio();  // SDL_CloseAudioDevice
 }
 
 int FFPlayer::read_thread() {
@@ -311,17 +535,36 @@ int FFPlayer::read_thread() {
     while (1) {
     //    std::cout << "read_thread sleep, mp:" << this << std::endl;
         // 先模拟线程运行
-        std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        // std::this_thread::sleep_for(std::chrono::milliseconds(100));
         if(abort_request){
             break;
+        }
+        
+        // 7.读取媒体数据，得到的是音视频分离后、解码前的数据
+        ret = av_read_frame(ic, pkt); // 调用不会释放pkt的数据，需要我们自己去释放packet的数据
+        if(ret < 0) { // 出错或者已经读取完毕了
+            if ((ret == AVERROR_EOF || avio_feof(ic->pb)) && !eof) {        // 读取完毕了
+                eof = 1;
+            }
+            if (ic->pb && ic->pb->error)  // io异常 // 退出循环
+                break;
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));     // 读取完数据了，这里可以使用timeout的方式休眠等待下一步的检测
+            continue;		// 继续循环
+        } else {
+            eof = 0;
+        }
+        // 插入队列  先只处理音频包
+        if (pkt->stream_index == audio_stream) {
+            printf("audio ===== pkt pts:%ld, dts:%ld\n", pkt->pts/48, pkt->dts);
+            packet_queue_put(&audioq, pkt);
+        } else {
+            av_packet_unref(pkt);// // 不入队列则直接释放数据
         }
     }
 
     std::cout << __FUNCTION__ << " leave" << std::endl;
-
-    return 0;
 fail:
-    return ret;
+    return 0;
 }
 
 Decoder::Decoder() 
