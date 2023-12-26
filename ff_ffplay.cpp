@@ -755,17 +755,16 @@ int Decoder::audio_thread(void* arg)
             goto the_end; // < =0 abort
         if(got_frame){
             tb = (AVRational){1, frame->sample_rate};  // 设置为sample_rate为timebase
-        }
         
-        // 3. 处理解码后的帧（例如，加入到播放队列）。
-        if(!(af = frame_queue_peek_writable(&is->sampq)))
-            goto the_end;
-        af->pts = (frame->pts == AV_NOPTS_VALUE) ? NAN : (frame->pts * av_q2d(tb));
-        af->duration = av_q2d((AVRational){frame->nb_samples, frame->sample_rate});//问题：为何不固定帧间隔，而是每次都去计算呢？
+            // 3. 处理解码后的帧（例如，加入到播放队列）。
+            if(!(af = frame_queue_peek_writable(&is->sampq)))
+                goto the_end;
+            af->pts = (frame->pts == AV_NOPTS_VALUE) ? NAN : (frame->pts * av_q2d(tb));
+            af->duration = av_q2d((AVRational){frame->nb_samples, frame->sample_rate});//问题：为何不固定帧间隔，而是每次都去计算呢？因为在不同的音频流中，帧的样本数可能会有所不同，尤其是在可变比特率编码中。
 
-        av_frame_move_ref(af->frame, frame);//问题：这个是不是相当于拷贝动作，就是将frame->af->frame？
-        frame_queue_push(&is->sampq);//问题：这个函数只是更新了索引值，似乎没有实际插入链表的什么操作呀，那他是怎么向队列插入一帧数据的呢？
-
+            av_frame_move_ref(af->frame, frame);//问题：这个是不是相当于拷贝动作，就是将frame->af->frame？这个函数实际上是将 frame 的所有权转移到 af->frame，而不是简单地复制数据。这比复制快且高效，因为它避免了不必要的数据复制
+            frame_queue_push(&is->sampq);//问题：这个函数只是更新了索引值，似乎没有实际插入链表的什么操作呀，那他是怎么向队列插入一帧数据的呢？这个函数不仅更新索引，它还将帧放入队列中
+        }
     }while(ret >= 0 || ret == AVERROR(EAGAIN) || ret == AVERROR_EOF);
 
 the_end:
