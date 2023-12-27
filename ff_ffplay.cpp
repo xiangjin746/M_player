@@ -562,7 +562,10 @@ int FFPlayer::read_thread() {
         if (pkt->stream_index == audio_stream) {
             printf("audio ===== pkt pts:%ld, dts:%ld\n", pkt->pts/48, pkt->dts);
             packet_queue_put(&audioq, pkt);
-        } else {
+        } else if(pkt->stream_index == video_stream){
+            printf("video ===== pkt pts:%ld, dts:%ld\n", pkt->pts/48, pkt->dts);
+            packet_queue_put(&videoq, pkt);
+        }else {
             av_packet_unref(pkt);// // 不入队列则直接释放数据
         }
     }

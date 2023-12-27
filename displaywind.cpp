@@ -32,29 +32,18 @@ int DisplayWind::Draw(const Frame *frame)
         img_scaler_ = new ImageScaler();
         double video_aspect_ratio = frame->width *1.0 / frame->height;
         double win_aspect_ratio = win_width*1.0 / win_height;
-        if(win_aspect_ratio > video_aspect_ratio) {
-            //此时应该是调整x的起始位置，以高度为基准
-            img_height = win_height;
-            if(img_height %2 != 0) {
-                img_height -= 1;
-            }
 
-            img_width = img_height*video_aspect_ratio;
-            if(img_width %2 != 0) {
-                img_width -= 1;
-            }
+        // 根据窗口和视频的宽高比，调整图像大小并保证尺寸为4的倍数
+        if (win_aspect_ratio > video_aspect_ratio) {
+            // 窗口宽高比较大，以视频高度为基准缩放
+            img_height = (win_height / 4) * 4; // 确保为4的倍数
+            img_width = ((int)(img_height * video_aspect_ratio) / 4) * 4; // 确保为4的倍数
             y_ = 0;
             x_ = (win_width - img_width) / 2;
         } else {
-            //此时应该是调整y的起始位置，以宽度为基准
-            img_width = win_width;
-            if(img_width %2 != 0) {
-                img_width -= 1;
-            }
-            img_height = img_width / video_aspect_ratio;
-            if(img_height %2 != 0) {
-                img_height -= 1;
-            }
+            // 视频宽高比较大，以窗口宽度为基准缩放
+            img_width = (win_width / 4) * 4; // 确保为4的倍数
+            img_height = ((int)(img_width / video_aspect_ratio) / 4) * 4; // 确保为4的倍数
             x_ = 0;
             y_ = (win_height - img_height) / 2;
         }
