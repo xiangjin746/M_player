@@ -75,6 +75,7 @@ int FFPlayer::stream_open(const char *file_name) {
     // ● 创建解复⽤读取线程read_thread
     read_thread_ = new std::thread(& FFPlayer::read_thread,this);
     // ● 创建视频刷新线程video_refresh_thread
+    video_refresh_thread_ = new std::thread(& FFPlayer::video_refresh_thread,this);
 
     return 0;
 fail:
@@ -230,6 +231,10 @@ void FFPlayer::stream_component_close(int stream_index)
         break;
     case AVMEDIA_TYPE_VIDEO:
         // ... 关闭视频相关的组件
+        // 请求退出视频画面刷新线程
+        if(video_refresh_thread_ && video_refresh_thread_->joinable()) {
+            video_refresh_thread_->join();  // 等待线程退出
+        }
         // 请求终止解码器线程
         // 关闭音频设备
         // 销毁解码器
@@ -565,6 +570,55 @@ int FFPlayer::read_thread() {
     std::cout << __FUNCTION__ << " leave" << std::endl;
 fail:
     return 0;
+}
+
+/* polls for possible required screen refresh at least this often, should be less than 1/fps */
+#define REFRESH_RATE 0.04  // 每帧休眠10ms
+
+// 默认是10ms检测一次是不是下一帧要输出了
+// 如果只差5ms输出 remaining_time =
+int FFPlayer::video_refresh_thread()
+{
+    double remaining_time = 0.0;
+
+    while (!abort_request){
+        if(remaining_time > 0.0){
+            av_usleep((int)(int64_t)(remaining_time*1000000.0));
+        }
+        remaining_time = REFRESH_RATE;
+        video_refresh(&remaining_time);
+    }
+    std::cout << __FUNCTION__ << " leave" << std::endl;
+}
+
+void FFPlayer::video_refresh(double *remaining_time)
+{
+    Frame *vp = NULL;
+
+    // 检查视频流:
+    if(video_st){
+        // 检查帧队列是否为空:
+        if(frame_queue_nb_remaining(&pictq) == 0){
+            return;
+        }
+        // 获取帧队列中的帧:
+        vp = frame_queue_peek(&pictq);
+
+        // 处理帧:
+        if(video_refresh_callback_){
+            video_refresh_callback_(vp);
+        }else{
+             std::cout << __FUNCTION__ << " video_refresh_callback_ NULL" << std::endl;
+        }
+
+        // 从队列中移除帧:
+        frame_queue_next(&pictq);
+    }
+}
+
+void FFPlayer::AddVideoRefreshCallback(std::function<int (const Frame *)> callback)
+{
+    video_refresh_callback_ = callback;
 }
 
 Decoder::Decoder() 

@@ -56,6 +56,10 @@ public:
     
     int read_thread();
 
+    int video_refresh_thread();
+    void video_refresh(double *remaining_time);
+    void AddVideoRefreshCallback(std::function<int(const Frame *)> callback);
+
     MessageQueue msg_queue_;
     std::thread *read_thread_;
 
@@ -92,6 +96,12 @@ public:
     unsigned int		audio_buf_size = 0;     // 待播放的一帧音频数据(audio_buf指向)的大小
     unsigned int		audio_buf1_size = 0;    // 申请到的音频缓冲区audio_buf1的实际尺寸
     int			audio_buf_index = 0;            // 更新拷贝位置 当前音频帧中已拷入SDL音频缓冲区
+
+
+    // 视频画面输出相关
+    std::thread *video_refresh_thread_ = NULL;
+    std::function<int(const Frame *)> video_refresh_callback_ = NULL;
+   
 
     int eof = 0;
     AVFormatContext *ic = NULL;

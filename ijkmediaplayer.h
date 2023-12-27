@@ -150,6 +150,8 @@ public:
 
     int ijkmp_msg_loop(void *arg);
 
+    void AddVideoRefreshCallback(std::function<int(const Frame *)> callback);
+
 private:
     // 互斥量
     std::mutex mutex_;

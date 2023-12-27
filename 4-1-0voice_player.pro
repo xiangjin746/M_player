@@ -37,6 +37,7 @@ SOURCES += \
 
 HEADERS += \
     ff_ffplay_def.h \
+    imagescaler.h \
         mainwind.h \
     ctrlbar.h \
     titlebar.h \

@@ -184,3 +184,7 @@ int IjkMediaPlayer::ijkmp_get_msg(AVMessage *msg, int block)
 void IjkMediaPlayer::ijkmp_set_playback_volume(float volume) {
     // 实现代码
 }
+
+void IjkMediaPlayer::AddVideoRefreshCallback(std::function<int(const Frame *)> callback){
+    ffplayer_->AddVideoRefreshCallback(callback);
+}
