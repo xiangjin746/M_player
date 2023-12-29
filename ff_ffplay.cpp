@@ -71,6 +71,7 @@ int FFPlayer::stream_open(const char *file_name) {
     }
 
     // ● 初始化时钟Clock
+    init_clock(&audclk);
     // ● 初始化⾳量
     // ● 创建解复⽤读取线程read_thread
     read_thread_ = new std::thread(& FFPlayer::read_thread,this);
@@ -370,6 +371,11 @@ static int audio_decode_frame(FFPlayer *is)
         resampled_data_size = data_size;
     }
 
+    if(!isnan(af->pts)){
+        is->audio_clock = af->pts;
+    }else{
+        is->audio_clock = NAN;
+    }
     // 6.更新音频帧队列：
     frame_queue_next(&is->sampq);
     ret = resampled_data_size;
@@ -417,6 +423,10 @@ static void sdl_audio_callback(void *opaque, Uint8 *stream, int len)
         len -= len1;// 步骤 3.3：更新指针和长度
         stream += len1;
         is->audio_buf_index += len1;
+    }
+
+    if(!isnan(is->audio_clock)){
+        set_clock(&is->audclk,is->audio_clock);
     }
 }
 
@@ -576,7 +586,7 @@ fail:
 }
 
 /* polls for possible required screen refresh at least this often, should be less than 1/fps */
-#define REFRESH_RATE 0.04  // 每帧休眠10ms
+#define REFRESH_RATE 0.01  // 每帧休眠10ms
 
 // 默认是10ms检测一次是不是下一帧要输出了
 // 如果只差5ms输出 remaining_time =
@@ -606,6 +616,14 @@ void FFPlayer::video_refresh(double *remaining_time)
         }
         // 获取帧队列中的帧:
         vp = frame_queue_peek(&pictq);
+
+        double diff = vp->pts - get_clock(&audclk);
+        std::cout << __FUNCTION__ << "vp->pts:" << vp->pts << " - af->pts:" << get_clock(&audclk) << ", diff:" << diff << std::endl;
+        if(diff > 0){
+            *remaining_time = FFMIN( *remaining_time,diff);
+            return;
+        }
+        
 
         // 处理帧:
         if(video_refresh_callback_){

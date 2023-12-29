@@ -105,6 +105,15 @@ typedef struct FrameQueue {
     PacketQueue	*pktq;                      // 数据包缓冲队列
 } FrameQueue;
 
+// 这里讲的系统时钟 是通过av_gettime_relative()获取到的时钟，单位为微妙
+typedef struct Clock {
+    double	pts;            // 时钟基础, 当前帧(待播放)显示时间戳，播放后，当前帧变成上一帧
+    // 当前pts与当前系统时钟的差值, audio、video对于该值是独立的
+    double	pts_drift;      // clock base minus time at which we updated the clock
+    // 当前时钟(如视频时钟)最后一次更新时间，也可称当前时钟时间
+    double	last_updated;   // 最后一次更新的系统时钟
+} Clock;
+
 
 // 队列相关
 int packet_queue_put(PacketQueue *q, AVPacket *pkt);
@@ -140,6 +149,14 @@ void frame_queue_push(FrameQueue *f);
 void frame_queue_next(FrameQueue *f);
 int frame_queue_nb_remaining(FrameQueue *f);
 int64_t frame_queue_last_pos(FrameQueue *f);
+
+void init_clock(Clock *c);
+
+void set_clock(Clock *c, double pts);
+
+void set_clock_at(Clock *c, double pts, double time);
+
+double get_clock(Clock *c);
 
 
 

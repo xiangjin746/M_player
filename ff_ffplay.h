@@ -67,6 +67,11 @@ public:
 
     int abort_request = 0;
 
+    Clock	audclk;             // 音频时钟
+    //Clock	vidclk;             // 视频时钟
+
+    double			audio_clock = 0;            // 当前音频帧的PTS+当前帧Duration
+
     // 帧队列
     FrameQueue pictq;
     FrameQueue sampq;
